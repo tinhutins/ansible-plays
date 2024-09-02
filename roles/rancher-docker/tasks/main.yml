@@ -1,0 +1,12 @@
+---
+- name: Installing older version of docker supported for rancher
+  import_tasks: install_older_docker.yml
+  #include_tasks: install_docker.yml
+  when: inventory_hostname in groups['all']
+  tags: [ 'never', 'install_older_docker']
+
+- name: Add docker server host non-ha, mysql local
+  import_tasks: install_docker_server_non_ha.yml
+  #include_tasks: install_docker.yml
+  when: inventory_hostname in groups['rancher_server']
+  tags: [ 'never', 'install_docker_server_non_ha']

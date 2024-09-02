@@ -1,0 +1,5 @@
+---
+- name: Provisioning  on all machines
+  import_tasks: provision.yml
+  when: inventory_hostname in groups['all']
+  tags: [ 'never', 'provision' ]

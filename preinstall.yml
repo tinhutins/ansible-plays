@@ -1,0 +1,11 @@
+---
+# Installs users ssh public keys, updates ntp with google timeservers, updates OS
+# If new users ssh public keys needs to be added you can run this role with tag: set_users_ssh_key
+- name: Run provision role 
+  hosts: all
+  remote_user: tino
+  gather_facts: true
+  roles:
+    - { role: roles/provision }
+  become: yes
+  become_user: root

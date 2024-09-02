@@ -1,0 +1,12 @@
+reboot_connect_timeout: 5
+reboot_post_reboot_delay: 15
+reboot_timeout: 600
+update_apt_cache: true
+
+# Enter packages version:
+# docker
+old_rancher_docker_ce_version: docker-ce=5:18.09.9~3-0~ubuntu-xenial
+old_rancher_docker_ce_cli_version: docker-ce-cli=5:18.09.9~3-0~ubuntu-xenial
+
+# pip
+pip_docker_version: 6.1.3

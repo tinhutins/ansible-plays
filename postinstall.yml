@@ -1,0 +1,8 @@
+---
+- name: Installing and configuring docker
+  hosts: all
+  remote_user: root
+  become: true
+  gather_facts: true
+  roles:
+    - { role: roles/rancher-docker }

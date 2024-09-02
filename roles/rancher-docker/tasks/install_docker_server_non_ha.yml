@@ -1,0 +1,25 @@
+---
+# - name: Create a user mysql
+#   ansible.builtin.user:
+#     name: mysql
+#     create_home: no
+#     shell: /bin/bash
+
+# - name: Create mysql directory
+#   file:
+#     path: /var/lib/mysql
+#     state: directory
+#     mode: '0755'
+#     owner: mysql
+#     group: mysql
+
+- name: Create rancher server container
+  ansible.builtin.command:
+    cmd: 'docker run --name rancher-server -d -v /var/lib/mysql:/var/lib/mysql --restart=unless-stopped -p 0.0.0.0:8080:8080 rancher/server'
+  register: result
+
+- name: Show rancher login
+  debug:
+    msg: "Login to rancher UI on : {{ ansible_ssh_host }}:8080"
+  when: result is succeeded
+  

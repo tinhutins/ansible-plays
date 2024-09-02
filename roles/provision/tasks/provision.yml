@@ -1,0 +1,104 @@
+---
+- name: Setup timezone
+  timezone:
+    name: CET
+
+- name: Disable CD-ROM repository if exists
+  ansible.builtin.command:
+    cmd: 'sed -i.bak -e "s/^deb cdrom:/#deb cdrom:/" /etc/apt/sources.list'
+
+- name: Update repository cache
+  apt:
+    update_cache: true
+    cache_valid_time: 3600
+    force_apt_get: true
+  ignore_errors: true
+  
+- name: Setup chrony
+  apt:
+    name: chrony
+    state: latest
+
+- name: Delete default chrony configuration
+  file:
+    path: /etc/chrony/chrony.conf
+    state: absent
+ 
+- name: Deploy chrony.conf from template
+  template:
+   src: chrony.conf.j2
+   dest: /etc/chrony/chrony.conf
+   owner: root
+   group: root
+   mode: 0644
+   backup: yes
+  
+- name: Setup chronyd service
+  service:
+    name: chronyd
+    enabled: true
+    state: started
+  when: ansible_facts['lsb']['release'] >= "20.04"
+
+- name: Setup chrony service
+  service:
+    name: chrony
+    enabled: true
+    state: started
+  when: ansible_facts['lsb']['release'] <= "20.04"
+
+- name: Replace key ID 1 with 0 in chrony.keys if that exists
+  ansible.builtin.replace:
+    path: /etc/chrony/chrony.keys
+    regexp: '^1 '
+    replace: '0 '
+
+- name: Sync time
+  shell: "chronyc -a  makestep"
+
+- name: Set authorized key for cratis devops team
+  authorized_key:
+    user: root
+    state: present
+    key: "{{ item }}"
+  with_file:
+    - public_keys/tino-rsa
+  tags: set_users_ssh_keys
+
+# Debian Family upgrade
+- name: Update all packages to their latest version
+  apt:
+    name: "*"
+    state: latest
+  when: ansible_os_family == "Debian"
+  
+- name: Upgrade the OS (apt-get upgrade) upgrade packages
+  apt:
+    upgrade: dist
+  when: ansible_os_family == "Debian"
+  
+#add needed packages and php repo for webservers
+- name: Install packages
+  apt:
+    name: "{{ packages }}"
+    state: present
+
+#update history
+- name: Update history files
+  blockinfile:
+    path: "{{ item.path }}"
+    block: |
+      export HISTTIMEFORMAT='%d.%m.%Y %T '
+      export HISTSIZE=30000
+      export HISTFILESIZE=30000
+      export HISTCONTROL=ignoredups
+  loop:
+    - { path: "/root/.bashrc" }
+    - { path: "/etc/bash.bashrc" }
+
+# Reboot after provision
+- name: Reboot host
+  reboot:
+    connect_timeout: "{{ reboot_connect_timeout }}"
+    post_reboot_delay: "{{ reboot_post_reboot_delay }}"
+    reboot_timeout: "{{ reboot_timeout }}"
