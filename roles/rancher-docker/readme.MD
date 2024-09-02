@@ -1,8 +1,8 @@
 install rancher server v1.6 and rancher worker node
+
 on both servers run this plays : 
 
 ```bash
-    ./install.sh
     ansible-playbook -i inventory/inventory_all.ini preinstall.yml --tags provision -kK
     ansible-playbook -i inventory/inventory_all.ini postinstall.yml --tags install_older_docker
 ```
