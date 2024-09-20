@@ -6,6 +6,7 @@
     block: |
       # Allow nonlocal bind, required for PostgreSQL VRRP
       net.ipv4.ip_nonlocal_bind = 1
+      vm.nr_hugepages = 200
  
 - name: Apply sysctl changes
   command: sysctl -p
