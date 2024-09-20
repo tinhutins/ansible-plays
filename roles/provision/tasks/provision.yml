@@ -47,7 +47,7 @@
     state: started
   when: ansible_facts['lsb']['release'] <= "20.04"
 
-- name: Replace key ID 1 with 0 in chrony.keys if that exists
+- name: Replace key ID 1 with 0 in chrony.keys if that exists so it doesn't make problem later with time sync
   ansible.builtin.replace:
     path: /etc/chrony/chrony.keys
     regexp: '^1 '

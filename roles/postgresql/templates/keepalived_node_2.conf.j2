@@ -1,0 +1,29 @@
+vrrp_script pg_check {
+      script "/opt/check_postgres.sh"
+      interval 20
+      timeout 5
+      rise 3
+      fall 3
+}
+
+vrrp_instance VI_1 {
+    state BACKUP
+    interface ens33
+    virtual_router_id 51
+    priority 100
+    advert_int 1
+    unicast_src_ip {{ ansible_host }}
+    unicast_peer {
+      {{ hostvars[groups['postgresql_cluster'][0]].ansible_default_ipv4.address }}
+    }
+    authentication {
+        auth_type PASS
+        auth_pass 20092024
+    }
+    virtual_ipaddress {
+        {{keepalived_vrrp}} dev ens33
+    }
+    track_script {
+        pg_check
+    }
+}

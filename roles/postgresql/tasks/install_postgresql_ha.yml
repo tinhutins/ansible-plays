@@ -1,0 +1,357 @@
+---
+# System Configuration (sysctl settings)
+- name: Configure sysctl parameters for PostgreSQL and VRRP
+  blockinfile:
+    path: /etc/sysctl.conf
+    block: |
+      # Allow nonlocal bind, required for PostgreSQL VRRP
+      net.ipv4.ip_nonlocal_bind = 1
+ 
+- name: Apply sysctl changes
+  command: sysctl -p
+
+- name: Add PostgreSQL GPG key
+  apt_key:
+    url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+    state: present
+
+- name: Add additional GPG key to avoid error NO_PUBKEY 7FCC7D46ACCC4CF8
+  apt_key:
+    keyserver: keyserver.ubuntu.com
+    id: 7FCC7D46ACCC4CF8
+    state: present
+
+# Add PostgreSQL APT repository
+- name: Add PostgreSQL APT repository
+  lineinfile:
+    path: /etc/apt/sources.list.d/pgdg.list
+    line: "deb http://apt.postgresql.org/pub/repos/apt {{ ansible_lsb.codename }}-pgdg main"
+    create: yes
+
+- name: Update package list
+  apt:
+    update_cache: yes
+
+#Install PostgreSQL, repmgr, and keepalived
+- name: Install PostgreSQL, repmgr, and keepalived
+  package:
+    name: "{{ packages }}"
+    state: present
+
+#template files for postgresql
+- name: Deploy PostgreSQL configuration
+  template:
+    src: templates/postgresql.conf.j2
+    dest: /etc/postgresql/16/main/postgresql.conf
+  notify: Reload PostgreSQL
+
+- name: Deploy pg_hba.conf
+  template:
+    src: templates/pg_hba.conf.j2
+    dest: /etc/postgresql/16/main/pg_hba.conf
+  notify: Reload PostgreSQL
+
+- name: Create sudoers file for postgres user
+  copy:
+    content: |
+      postgres ALL=(ALL) NOPASSWD: ALL
+      postgres ALL=(ALL) NOPASSWD: /bin/systemctl start postgresql.service
+      postgres ALL=(ALL) NOPASSWD: /bin/systemctl stop postgresql.service
+      postgres ALL=(ALL) NOPASSWD: /bin/systemctl restart postgresql.service
+      postgres ALL=(ALL) NOPASSWD: /bin/systemctl reload postgresql.service
+    dest: /etc/sudoers.d/postgres
+    mode: '0440'
+
+- name: Enable and restart PostgreSQL
+  systemd:
+    name: postgresql
+    enabled: yes
+    state: restarted
+
+- name: Check if PostgreSQL is running on all interfaces
+  shell: "ss -nlptu | grep postgres"
+  register: postgres_status
+- debug: var=postgres_status.stdout_lines
+
+- name: Create replication user and database on both nodes
+  become_user: postgres
+  shell: |
+    createuser --superuser repmgr;
+    createdb --owner=repmgr repmgr;
+    psql -c "ALTER USER repmgr SET search_path TO repmgr, public";
+
+- name: Configure repmgr.conf of first node
+  template:
+    src: templates/repmgr_node_1.conf.j2
+    dest: /etc/repmgr.conf
+  when: inventory_hostname in groups['postgresql_cluster'][0]
+  notify: Restart repmgrd
+
+- name: Configure repmgr.conf of second node
+  template:
+    src: templates/repmgr_node_2.conf.j2
+    dest: /etc/repmgr.conf
+  when: inventory_hostname in groups['postgresql_cluster'][1]
+  notify: Restart repmgrd
+
+- name: Create log directory for repmgr
+  file:
+    path: /var/log/repmgr/
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0755'
+
+- name: Create empty log files for follow, promote and repmgr
+  copy:
+    content: ''
+    dest: "/var/log/repmgr/{{ item }}"
+    owner: postgres
+    group: postgres
+  loop:
+    - follow.log
+    - promote.log
+    - repmgr.log
+
+- name: Configure logrotate for PostgreSQL and repmgr logs
+  copy:
+    dest: /etc/logrotate.d/postgresql-repmgr
+    content: |
+      /var/log/repmgr/*.log {
+          daily
+          missingok
+          rotate 10
+          copytruncate
+          delaycompress
+          compress
+          notifempty
+          su root root
+      }
+
+- name: Ensure logrotate configuration for PostgreSQL is updated to daily
+  replace:
+    path: /etc/logrotate.d/postgresql-common
+    regexp: 'weekly'
+    replace: 'daily'
+
+- name: Reload logrotate configuration
+  command: logrotate -f /etc/logrotate.conf
+
+- name: Copy setEnv.sh script first node
+  template:
+    src: scripts/setENV_node_1.sh
+    dest: /opt/setEnv.sh
+    mode: '0755'
+    owner: root
+    group: postgres
+  when: inventory_hostname in groups['postgresql_cluster'][0]
+
+- name: Copy setEnv.sh script second node
+  template:
+    src: scripts/setENV_node_2.sh
+    dest: /opt/setEnv.sh
+    mode: '0755'
+    owner: root
+    group: postgres
+  when: inventory_hostname in groups['postgresql_cluster'][1]
+
+- name: Copy promote.sh script on both nodes
+  template:
+    src: scripts/promote.sh
+    dest: /opt/promote.sh
+    mode: '0755'
+    owner: root
+    group: postgres
+
+- name: Copy follow script first node
+  template:
+    src: scripts/follow_on_node_1.sh
+    dest: /opt/follow.sh
+    mode: '0755'
+    owner: root
+    group: postgres
+  when: inventory_hostname in groups['postgresql_cluster'][0]
+
+- name: Copy follow script second node
+  template:
+    src: scripts/follow_on_node_2.sh
+    dest: /opt/follow.sh
+    mode: '0755'
+    owner: root
+    group: postgres
+  when: inventory_hostname in groups['postgresql_cluster'][1]
+
+# Setup replication cluster with repmgr
+- name: Register the primary node
+  command: sudo -u postgres repmgr -f /etc/repmgr.conf primary register
+  when: inventory_hostname == groups['postgresql_cluster'][0]
+  register: register_primary
+  changed_when: "'registered' in register_primary.stdout"
+
+- name: Verify registration of primary node
+  command: sudo -u postgres repmgr -f /etc/repmgr.conf cluster show
+  when: inventory_hostname == groups['postgresql_cluster'][0]
+  register: verify_primary
+
+- debug:
+    var: verify_primary.stdout_lines
+  when: inventory_hostname == groups['postgresql_cluster'][0]
+
+- name: Stop PostgreSQL on standby node
+  systemd:
+    name: postgresql
+    state: stopped
+  when: inventory_hostname == groups['postgresql_cluster'][1]
+
+- name: Clean up data directory on standby node
+  file:
+    path: /var/lib/postgresql/16/main
+    state: absent
+  when: inventory_hostname == groups['postgresql_cluster'][1]
+
+- name: Create data directory for standby node
+  file:
+    path: /var/lib/postgresql/16/main
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0700'
+  when: inventory_hostname == groups['postgresql_cluster'][1]
+
+- name: Clone the standby node from primary
+  command: sudo -u postgres repmgr -h {{ hostvars[groups['postgresql_cluster'][0]].ansible_default_ipv4.address }} -U repmgr -d repmgr -f /etc/repmgr.conf standby clone -F
+  when: inventory_hostname == groups['postgresql_cluster'][1]
+  register: clone_standby
+  changed_when: "'cloned' in clone_standby.stdout"
+
+- name: Start PostgreSQL on standby node
+  systemd:
+    name: postgresql
+    state: started
+  when: inventory_hostname == groups['postgresql_cluster'][1]
+
+- name: Verify that PostgreSQL is running on standby node
+  command: systemctl status postgresql
+  when: inventory_hostname == groups['postgresql_cluster'][1]
+
+- name: Check WAL receiver status on standby node
+  command: sudo -u postgres psql -c "SELECT * FROM pg_stat_wal_receiver;"
+  when: inventory_hostname == groups['postgresql_cluster'][1]
+  register: wal_receiver_status
+
+- debug:
+    var: wal_receiver_status.stdout_lines
+  when: inventory_hostname == groups['postgresql_cluster'][1]
+
+- name: Register standby node
+  command: sudo -u postgres repmgr -f /etc/repmgr.conf standby register
+  when: inventory_hostname == groups['postgresql_cluster'][1]
+  register: register_standby
+  changed_when: "'registered' in register_standby.stdout"
+
+- name: Verify registration of both nodes
+  command: sudo -u postgres repmgr -f /etc/repmgr.conf cluster show
+  register: verify_both
+  when: inventory_hostname in groups['postgresql_cluster']
+
+- debug:
+    var: verify_both.stdout_lines
+
+- name: Start repmgrd daemon on both nodes
+  command: repmgrd -f /etc/repmgr.conf -d
+  async: 10
+  poll: 0
+  when: inventory_hostname in groups['postgresql_cluster']
+
+#Setup repmgrd as systemd service
+- name: Locate existing repmgrd init script
+  command: find /etc/init.d/ -name 'repmgrd*'
+  register: init_script
+  when: inventory_hostname in groups['postgresql_cluster']
+  ignore_errors: true
+
+- name: Backup existing init script to /root
+  command: cp {{ item }} /root/repmgrd.backup
+  with_items: "{{ init_script.stdout_lines }}"
+  when: init_script.stdout_lines | length > 0
+
+- name: Remove existing init script
+  file:
+    path: /etc/init.d/repmgrd
+    state: absent
+  when: init_script.stdout_lines | length > 0
+
+- name: Create tmpfiles.d configuration for repmgrd
+  copy:
+    content: |
+      d /run/repmgr 0755 postgres postgres -
+    dest: /etc/tmpfiles.d/repmgrd.conf
+
+- name: Copy repmgrd service
+  copy:
+    src: "files/repmgrd.service"
+    dest: "/etc/systemd/system/repmgrd.service"
+    owner: 'root'
+    group: 'root'
+    mode: '0644'
+
+- name: Reload systemd daemon
+  command: systemctl daemon-reload
+
+- name: Enable repmgrd service
+  command: systemctl enable repmgrd
+
+- name: Start repmgrd service
+  command: systemctl restart repmgrd
+
+- name: Check status of repmgrd service
+  command: systemctl status repmgrd
+  register: repmgrd_status
+  ignore_errors: true
+
+- debug:
+    var: repmgrd_status.stdout_lines
+
+- name: Show repmgr cluster status
+  command: sudo -u postgres repmgr cluster show
+  register: repmgr_cluster_status
+
+- debug:
+    var: repmgr_cluster_status.stdout_lines
+
+#keepalived
+- name: Configure keepalived.conf on first node
+  template:
+    src: templates/keepalived_node_1.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+  when: inventory_hostname == groups['postgresql_cluster'][0]
+
+# Configure Keepalived on standby node
+- name: Configure keepalived.conf on second node
+  template:
+    src: templates/keepalived_node_2.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+  when: inventory_hostname == groups['postgresql_cluster'][1]
+
+# Copy health check script on both nodes
+- name: Copy check_postgres.sh script
+  template:
+    src: templates/scripts/check_postgres.sh
+    dest: /opt/check_postgres.sh
+    mode: '0755'
+
+# Restart and enable Keepalived service
+- name: Start and enable Keepalived service
+  systemd:
+    name: keepalived
+    state: restarted
+    enabled: yes
+
+# Add follow script to crontab for the root user on both nodes to track state of postgres cluster
+- name: Add follow.sh script to crontab
+  cron:
+    name: "Run follow.sh every minute"
+    minute: "*/1"
+    job: "/opt/follow.sh"
+    state: present
+  become: true

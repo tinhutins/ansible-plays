@@ -1,0 +1,5 @@
+---
+- name: Installing postgresql in HA mode primary-standby
+  import_tasks: install_postgresql_ha.yml
+  when: inventory_hostname in groups['all']
+  tags: [ 'never', 'install_postgresql_ha']

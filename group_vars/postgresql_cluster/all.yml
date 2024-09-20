@@ -1,0 +1,13 @@
+reboot_connect_timeout: 5
+reboot_post_reboot_delay: 15
+reboot_timeout: 600
+update_apt_cache: true
+
+packages:
+  - postgresql-16
+  - postgresql-contrib-16
+  - repmgr
+  - keepalived
+
+local_network: 192.168.43.0/24
+keepalived_vrrp: 192.168.43.200/32

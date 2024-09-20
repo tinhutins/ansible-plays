@@ -6,3 +6,11 @@
   gather_facts: true
   roles:
     - { role: roles/rancher-docker }
+
+- name: Installing and configuring HA postgresql cluster
+  hosts: postgresql_cluster
+  remote_user: root
+  become: true
+  gather_facts: true
+  roles:
+    - { role: roles/postgresql }
