@@ -321,18 +321,6 @@
     var: repmgr_cluster_status.stdout_lines
 
 #keepalived
-- name: Configure keepalived.conf on first node
-  template:
-    src: templates/keepalived_node_1.conf.j2
-    dest: /etc/keepalived/keepalived.conf
-  when: inventory_hostname == groups['postgresql_cluster'][0]
-
-# Configure Keepalived on standby node
-- name: Configure keepalived.conf on second node
-  template:
-    src: templates/keepalived_node_2.conf.j2
-    dest: /etc/keepalived/keepalived.conf
-  when: inventory_hostname == groups['postgresql_cluster'][1]
 
 # Copy health check script on both nodes
 - name: Copy check_postgres.sh script
@@ -341,12 +329,31 @@
     dest: /opt/check_postgres.sh
     mode: '0755'
 
-# Restart and enable Keepalived service
-- name: Start and enable Keepalived service
+- name: Configure keepalived.conf on first node
+  template:
+    src: templates/keepalived_node_1.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+  when: inventory_hostname == groups['postgresql_cluster'][0]
+
+- name: Start and enable Keepalived service on first node
   systemd:
     name: keepalived
     state: restarted
     enabled: yes
+  when: inventory_hostname == groups['postgresql_cluster'][0]
+
+- name: Configure keepalived.conf on second node
+  template:
+    src: templates/keepalived_node_2.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+  when: inventory_hostname == groups['postgresql_cluster'][1]
+
+- name: Start and enable Keepalived service on second node
+  systemd:
+    name: keepalived
+    state: restarted
+    enabled: yes
+  when: inventory_hostname == groups['postgresql_cluster'][1]
 
 # Add follow script to crontab for the root user on both nodes to track state of postgres cluster
 - name: Add follow.sh script to crontab
