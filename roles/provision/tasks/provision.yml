@@ -64,7 +64,7 @@
   with_file:
     - public_keys/tino-rsa
   tags: set_users_ssh_keys
-
+    
 # Debian Family upgrade
 - name: Update all packages to their latest version
   apt:
@@ -77,7 +77,7 @@
     upgrade: dist
   when: ansible_os_family == "Debian"
   
-#add needed packages and php repo for webservers
+#add needed packages
 - name: Install packages
   apt:
     name: "{{ packages }}"

@@ -14,3 +14,11 @@
   gather_facts: true
   roles:
     - { role: roles/postgresql }
+
+- name: Installing and configuring mongodb replicaset cluster
+  hosts: mongodb_cluster
+  remote_user: root
+  become: true
+  gather_facts: true
+  roles:
+    - { role: roles/mongodb }

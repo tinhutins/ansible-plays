@@ -1,0 +1,196 @@
+- name: Update /etc/hosts file with MongoDB nodes
+  lineinfile:
+    path: /etc/hosts
+    line: "{{ hostvars[item]['ansible_host'] }} {{ item }}"
+  loop: "{{ groups['mongodb_cluster'] }}"
+  when: ansible_facts['default_ipv4']['address'] == ansible_host
+
+- name: Install required packages
+  apt:
+    name: "{{ item }}"
+    state: present
+    update_cache: yes
+  loop:
+    - gnupg
+    - curl
+
+- name: Add MongoDB keyring and repository
+  shell: |
+    curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor
+    echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+
+- name: Update apt cache after MongoDB repository addition
+  apt:
+    update_cache: yes
+
+- name: Install MongoDB on all nodes
+  apt:
+    name: mongodb-org
+    state: present
+
+- name: Create replica set key file on primary node
+  shell: |
+    openssl rand -base64 756 > /etc/replica.key
+    chmod 400 /etc/replica.key
+    chown mongodb:mongodb /etc/replica.key
+  when: inventory_hostname == groups['mongodb_node_1'][0]
+
+- name: Fetch replica set key file from primary node to controller
+  fetch:
+    src: /etc/replica.key
+    dest: /tmp/replica.key
+    flat: yes
+  when: inventory_hostname == groups['mongodb_node_1'][0]
+
+- name: Copy replica set key file to other nodes
+  copy:
+    src: /tmp/replica.key
+    dest: /etc/replica.key
+    owner: mongodb
+    group: mongodb
+    mode: '0400'
+  when: inventory_hostname != groups['mongodb_node_1'][0]
+
+- name: Create mongod configuration file
+  template:
+    src: mongod.conf.j2
+    dest: /etc/mongod.conf
+    owner: mongodb
+    group: mongodb
+    mode: '0644'
+
+- name: Enable and start MongoDB service
+  systemd:
+    name: mongod
+    state: started
+    enabled: yes
+
+# Configure MongoDB Replica Set
+- name: Wait for MongoDB service to be up on all nodes
+  wait_for:
+    host: "{{ ansible_host }}"
+    port: 27017
+    state: started
+    timeout: 60
+
+- name: Initialize the replica set on primary node
+  community.mongodb.mongodb_shell:
+    eval: "rs.initiate()"
+  when: inventory_hostname == groups['mongodb_node_1'][0]
+
+#for adding admin user we need to have pymongo package on nodes
+- name: Install pymongo via pip
+  apt:
+    name: python3-pip
+    state: present
+
+- name: Install pymongo package
+  pip:
+    name: pymongo
+    state: present
+    executable: pip3
+
+- name: Create MongoDB admin user
+  mongodb_user:
+    database: admin
+    name: "{{ mongo_admin_user }}"
+    password: "{{ mongo_admin_pass }}"
+    roles: ['root']
+    state: present
+  when: inventory_hostname == groups['mongodb_node_1'][0]
+  become: true
+  become_user: mongodb
+
+- name: Pause for 1 minutes to allow initialize
+  ansible.builtin.pause:
+    minutes: 1
+
+- name: Set Default Write Concern
+  community.mongodb.mongodb_shell:
+    login_user: "{{ mongo_admin_user }}"
+    login_password: "{{ mongo_admin_pass }}"
+    login_database: "admin"
+    eval: >
+      db.adminCommand({
+          "setDefaultRWConcern": 1,
+          "defaultWriteConcern": {
+            "w": 1
+          }
+        })
+  when: inventory_hostname == groups['mongodb_node_1'][0]
+
+- name: Add second node to the replica set
+  community.mongodb.mongodb_shell:
+    login_user: "{{ mongo_admin_user }}"
+    login_password: "{{ mongo_admin_pass }}"
+    login_database: "admin"
+    eval: "rs.add('{{ groups['mongodb_node_2'][0] }}:27017')"
+  when: inventory_hostname == groups['mongodb_node_1'][0]
+
+- name: Add arbiter node to the replica set
+  community.mongodb.mongodb_shell:
+    login_user: "{{ mongo_admin_user }}"
+    login_password: "{{ mongo_admin_pass }}"
+    login_database: "admin"
+    eval: "rs.addArb('{{ groups['mongodb_arb'][0] }}:27017')"
+  when: inventory_hostname == groups['mongodb_node_1'][0]
+
+#check replicaset
+- name: Test and debug MongoDB replica set configuration
+  community.mongodb.mongodb_shell:
+    login_user: "{{ mongo_admin_user }}"
+    login_password: "{{ mongo_admin_pass }}"
+    login_database: "admin"
+    eval: "rs.status()"
+  register: rs_status_output
+  when: inventory_hostname == groups['mongodb_node_1'][0]
+
+- name: Debug MongoDB replica set configuration
+  debug:
+    var: rs_status_output
+  when: inventory_hostname == groups['mongodb_node_1'][0]
+
+#add keepalived
+- name: Install required packages
+  apt:
+    name:
+      - keepalived
+    state: present
+    update_cache: yes
+  when: inventory_hostname == groups['mongodb_node_1'][0] or inventory_hostname == groups['mongodb_node_2'][0]
+
+- name: Create Keepalived configuration
+  template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    owner: root
+    group: root
+    mode: '0644'
+  when: inventory_hostname == groups['mongodb_node_1'][0] or inventory_hostname == groups['mongodb_node_2'][0]
+
+- name: Create MongoDB master check script
+  copy:
+    content: |
+      #!/bin/bash
+      ISMASTER=$(/usr/bin/mongosh -host 127.0.0.1 --quiet --eval 'db.isMaster().ismaster')
+      if [ "$ISMASTER" == "true" ]; then
+        exit 0
+      else
+        exit 1
+      fi
+    dest: /etc/keepalived/ck_mongo_master
+    mode: '0755'
+  when: inventory_hostname == groups['mongodb_node_1'][0] or inventory_hostname == groups['mongodb_node_2'][0]
+
+- name: Enable and start keepalived service
+  systemd:
+    name: keepalived
+    state: started
+    enabled: yes
+  when: inventory_hostname == groups['mongodb_node_1'][0] or inventory_hostname == groups['mongodb_node_2'][0]
+
+- name: Restart keepalived service
+  systemd:
+    name: keepalived
+    state: restarted
+  when: inventory_hostname == groups['mongodb_node_1'][0] or inventory_hostname == groups['mongodb_node_2'][0]

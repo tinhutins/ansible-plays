@@ -1,0 +1,15 @@
+reboot_connect_timeout: 5
+reboot_post_reboot_delay: 15
+reboot_timeout: 600
+update_apt_cache: true
+
+# ansible_python_interpreter: /root/git_folders/ansible-plays/ansible-env/bin/python
+
+# MongoDB Admin User Details
+mongo_admin_user: "admin"
+mongo_admin_pass: "password"
+
+# Replica Set Configuration
+replica_set_name: "rs0"
+#keepalived float ip
+keepalived_virtual_ip: 192.168.43.150

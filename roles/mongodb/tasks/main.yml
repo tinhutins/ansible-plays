@@ -1,0 +1,5 @@
+---
+- name: Installing mongodb rs
+  import_tasks: install_mongodb_rs.yml
+  when: inventory_hostname in groups['mongodb_cluster']
+  tags: [ 'never', 'install_mongodb_rs']

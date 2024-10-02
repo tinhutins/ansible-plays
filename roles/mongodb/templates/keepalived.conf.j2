@@ -1,0 +1,34 @@
+global_defs {
+    router_id MONGODB_DB-HA
+}
+
+vrrp_script chk_mongod {
+    script "killall -0 mongod"
+    interval 2
+    weight 2
+}
+
+vrrp_script chk_mongo_primary {
+    script "/etc/keepalived/ck_mongo_master"
+    interval 2
+    weight 2
+}
+
+vrrp_instance VI_2 {
+    state BACKUP
+    interface {{ ansible_default_ipv4.interface }}
+    virtual_router_id 50
+    priority {{ '101' if inventory_hostname == groups['mongodb_node_1'][0] else '100' }}
+    advert_int 1
+    authentication {
+        auth_type PASS
+        auth_pass pass
+    }
+    virtual_ipaddress {
+        {{ keepalived_virtual_ip }}
+    }
+    track_script {
+        chk_mongod
+        chk_mongo_primary
+    }
+}
