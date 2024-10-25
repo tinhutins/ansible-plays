@@ -10,3 +10,4 @@ containers_dir: /var/containers
 mysql_image: mysql:8.0.40
 zabbix_server_mysql_image: zabbix/zabbix-server-mysql:7.0.5-alpine
 zabbix_server_web_nginx_image: zabbix/zabbix-web-nginx-mysql:7.0.5-alpine
+zabbix_server_agent_image: zabbix/zabbix-agent:7.0.5-alpine

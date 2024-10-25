@@ -65,3 +65,18 @@ services:
     depends_on:
       - zabbix-server-mysql
     restart: unless-stopped
+
+  zabbix-agent:
+    image: {{zabbix_server_agent_image}}  # Replace with your Zabbix agent image
+    container_name: zabbix-agent
+    environment:
+      ZBX_HOSTNAME: "Zabbix server"         # Hostname for the Zabbix agent conf that neeeds to match hostname auto added for zabbix server in gui 
+      ZBX_SERVER_HOST: "zabbix-server-mysql"  # Zabbix server host
+      ZBX_SERVER_PORT: 10051                 # Zabbix server port
+    networks:
+      - zabbix-net                           # Ensure networks is a list
+    ports:
+      - "10050:10050"
+    depends_on:
+      - zabbix-server-mysql                 # Ensure the agent starts after the server
+    restart: unless-stopped
