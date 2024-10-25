@@ -7,7 +7,7 @@ ansible-vault password is:
 
 provision VM, add docker and docker-compose:
 ```bash
-    ansible-playbook -i inventory/inventory_all.ini preinstall.yml --tags provision -kK
+    ansible-playbook -i inventory/inventory_zabbix_docker.ini preinstall.yml --tags provision -kK
     ansible-playbook -i inventory/inventory_zabbix_docker.ini postinstall.yml --tags install_docker_docker_compose --ask-vault-pass
 ```
 
