@@ -1,0 +1,12 @@
+# Enter packages version:
+# docker
+docker_ce_version: docker-ce=5:27.3.1-1~ubuntu.22.04~jammy
+# pip
+pip_docker_version: 6.1.3
+pip_docker_compose_version: 1.29.2
+
+#containers_info
+containers_dir: /var/containers
+mysql_image: mysql:8.0.40
+zabbix_server_mysql_image: zabbix/zabbix-server-mysql:7.0.5-alpine
+zabbix_server_web_nginx_image: zabbix/zabbix-web-nginx-mysql:7.0.5-alpine

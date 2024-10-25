@@ -1,0 +1,114 @@
+---
+- name: Register debian destribution
+  shell: lsb_release -cs
+  register: lsb_release
+  when: ansible_os_family == "Debian"
+
+- name: Register debian arhitecture
+  shell: dpkg --print-architecture
+  register: arch
+  when: ansible_os_family == "Debian"
+
+- name: Update repository cache
+  apt:
+    update_cache: true
+    cache_valid_time: 3600
+    force_apt_get: true
+  ignore_errors: true
+
+- name: Install additional packages
+  package:
+    name:
+      - python3-pip
+    state: latest
+
+- name: Remove docker packages if already installed
+  apt:
+    name: "docker*"
+    state: absent
+
+- name: Remove docker files if they exist
+  file:
+    name: "{{ item }}"
+    state: absent
+  loop:
+    - '/var/lib/docker'
+    - '/var/run/docker.sock'
+    - '/usr/bin/docker-compose'
+
+- name: Remove podman packages if already installed
+  apt:
+    name: "podman*"
+    state: absent
+  ignore_errors: True
+
+- name: Add an apt docker signing key
+  ansible.builtin.apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+    keyring: /usr/share/keyrings/docker-archive-keyring.gpg
+
+- name: Add specified repository into sources list
+  ansible.builtin.apt_repository:
+    repo: "deb [arch={{ arch.stdout }} signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu {{ lsb_release.stdout }} stable"
+    state: present
+    filename: docker
+
+- name: Update repository cache
+  apt:
+    update_cache: true
+    cache_valid_time: 3600
+    force_apt_get: true
+  ignore_errors: true
+
+- name: Create docker configuration directory
+  file:
+    path: /etc/docker
+    state: directory
+    mode: '0700'
+
+- name: Create docker containers directory
+  file:
+    path: /var/containers
+    state: directory
+    mode: '0700'
+
+- name: Creat docker log directory
+  file:
+    path: /var/log/docker
+    state: directory
+    owner: syslog
+    group: adm
+    mode: '0700'
+
+- name: Copy docker related configuration files
+  copy:
+    src: "{{ item.src }}"
+    dest: "/etc/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - { src: 'docker/daemon.json', dest: 'docker/daemon.json' }
+    - { src: 'docker/docker-logrotate.conf', dest: 'logrotate.d/docker.conf' }
+    - { src: 'docker/docker-rsyslog.conf', dest: 'rsyslog.d/10-docker.conf' }
+
+- name: Install or upgrade pip packages
+  pip:
+    name:
+      - docker=={{ pip_docker_version }}
+      - docker-compose=={{ pip_docker_compose_version }}
+    executable: pip3
+
+- name: Install docker packages
+  apt:
+    name: "{{ docker_ce_version }}"
+    state: present
+    update_cache: yes
+
+# Reboot after docker is installed
+- name: Reboot host
+  reboot:
+    connect_timeout: "{{ reboot_connect_timeout }}"
+    post_reboot_delay: "{{ reboot_post_reboot_delay }}"
+    reboot_timeout: "{{ reboot_timeout }}"

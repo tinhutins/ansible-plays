@@ -1,0 +1,67 @@
+networks:
+  zabbix-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          ip_range: 172.20.240.0/20
+
+services:
+  mysql-server:
+    image: {{mysql_image}}
+    container_name: mysql-server
+    environment:
+      MYSQL_DATABASE: {{MYSQL_DATABASE}}
+      MYSQL_USER: {{MYSQL_USER}}
+      MYSQL_PASSWORD: {{MYSQL_PASSWORD}}
+      MYSQL_ROOT_PASSWORD: {{MYSQL_ROOT_PASSWORD}}
+    volumes:
+      - ./mysql-data:/var/lib/mysql               # Persistent MySQL data storage
+      - ./db-init/create.sql.gz:/tmp/create.sql.gz  # Mount the SQL file
+      - ./db-init/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh  # Mount the script file
+    networks:
+      - zabbix-net                                # Ensure networks is a list
+    restart: unless-stopped
+    command:                                      # Fixed the command list
+      - --character-set-server=utf8
+      - --collation-server=utf8_bin
+      - --default-authentication-plugin=mysql_native_password
+
+  zabbix-server-mysql:
+    image: {{zabbix_server_mysql_image}}
+    container_name: zabbix-server-mysql
+    environment:
+      DB_SERVER_HOST: "mysql-server"
+      MYSQL_DATABASE: {{MYSQL_DATABASE}}
+      MYSQL_USER: {{MYSQL_USER}}
+      MYSQL_PASSWORD: {{MYSQL_PASSWORD}}
+      MYSQL_ROOT_PASSWORD: {{MYSQL_ROOT_PASSWORD}}
+    networks:
+      - zabbix-net                                # Ensure networks is a list
+    ports:
+      - "10051:10051"
+    depends_on:
+      - mysql-server
+    restart: unless-stopped
+
+  zabbix-web-nginx-mysql:
+    image: {{zabbix_server_web_nginx_image}}
+    container_name: zabbix-web-nginx-mysql
+    environment:
+      ZBX_SERVER_HOST: "zabbix-server-mysql"
+      DB_SERVER_HOST: "mysql-server"
+      MYSQL_DATABASE: {{MYSQL_DATABASE}}
+      MYSQL_USER: {{MYSQL_USER}}
+      MYSQL_PASSWORD: {{MYSQL_PASSWORD}}
+      MYSQL_ROOT_PASSWORD: {{MYSQL_ROOT_PASSWORD}}
+    volumes:
+ #    - ./nginx/nginx.conf:/etc/nginx/http.d/nginx.conf
+      - ./nginx/ssl:/etc/ssl/nginx
+    networks:
+      - zabbix-net                                # Ensure networks is a list
+    ports:
+#     - "80:8080"
+      - "443:8443"
+    depends_on:
+      - zabbix-server-mysql
+    restart: unless-stopped

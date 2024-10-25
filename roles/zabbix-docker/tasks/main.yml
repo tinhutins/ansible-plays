@@ -1,0 +1,12 @@
+---
+- name: Installing docker and docker compose
+  import_tasks: install_docker_docker_compose.yml
+  #include_tasks: install_docker.yml
+  when: inventory_hostname in groups['zabbix_docker']
+  tags: [ 'never', 'install_docker_docker_compose']
+
+- name: Installing zabbix in docker
+  import_tasks: install_zabbix_docker.yml
+  #include_tasks: install_docker.yml
+  when: inventory_hostname in groups['zabbix_docker']
+  tags: [ 'never', 'install_zabbix_docker']

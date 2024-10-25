@@ -22,3 +22,11 @@
   gather_facts: true
   roles:
     - { role: roles/mongodb }
+
+- name: Installing and configuring zabbix server in docker
+  hosts: zabbix_docker
+  remote_user: root
+  become: true
+  gather_facts: true
+  roles:
+    - { role: roles/zabbix-docker }

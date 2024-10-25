@@ -1,0 +1,73 @@
+---
+- name: Create docker container main folder {{ containers_dir }}
+  file:
+    path: "{{ containers_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Create docker containers directory structure 
+  file:
+    path: "{{ containers_dir }}/{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "nginx/ssl"
+    - "db-init"
+    - "mysql-data"
+
+- name: Copy db files
+  ansible.builtin.copy:
+    src: "db-init/{{ item }}"
+    dest: "{{ containers_dir }}/db-init/{{ item }}"
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - create.sql.gz
+    - init-db.sh
+
+- name: Copy cert and key files for domains from ansible-vault
+  ansible.builtin.copy:
+    content: "{{ item.content }}"
+    dest: "{{ containers_dir }}/nginx/ssl/{{ item.name }}"
+    owner: 'root'
+    group: 'root'
+    mode: '0777'
+  loop:
+    - "{{ ssl_certificate_root }}"
+    - "{{ ssl_certificate_dhparam }}"
+    - "{{ ssl_certificate_key }}"
+    - "{{ ssl_certificate_crt }}"
+
+- name: Copy docker compose config file
+  ansible.builtin.template:
+    src: "docker-compose.j2"
+    dest: "/var/containers/docker-compose.yml"
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Delete existing services if exist
+  community.docker.docker_compose_v2:
+    project_src: /var/containers
+    state: absent
+
+- name: Create and start all services
+  community.docker.docker_compose_v2:
+    project_src: /var/containers/
+    state: present
+
+- name: Pause for 1 minute to allow sql starting to load zabbix scheme
+  ansible.builtin.pause:
+    minutes: 1
+
+- name: Wait for MySQL to be ready based on container mysql-server log message
+  shell: "docker logs --tail 5 mysql-server 2>&1 | grep -q 'ready for connections'"
+  register: mysql_ready
+  until: mysql_ready.rc == 0
+  retries: 10
+  delay: 30
+
+- name: Print message when MySQL is ready
+  debug:
+    msg: "MySQL is ready for connections."
